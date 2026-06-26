@@ -14,7 +14,143 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      applications: {
+        Row: {
+          applied_at: string
+          company: string
+          company_norm: string
+          created_at: string
+          id: string
+          last_email_id: string | null
+          last_status_at: string
+          notes: string | null
+          role: string
+          role_norm: string
+          source: string
+          status: Database["public"]["Enums"]["application_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          applied_at: string
+          company: string
+          company_norm: string
+          created_at?: string
+          id?: string
+          last_email_id?: string | null
+          last_status_at?: string
+          notes?: string | null
+          role: string
+          role_norm: string
+          source?: string
+          status?: Database["public"]["Enums"]["application_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          applied_at?: string
+          company?: string
+          company_norm?: string
+          created_at?: string
+          id?: string
+          last_email_id?: string | null
+          last_status_at?: string
+          notes?: string | null
+          role?: string
+          role_norm?: string
+          source?: string
+          status?: Database["public"]["Enums"]["application_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      email_events: {
+        Row: {
+          application_id: string | null
+          created_at: string
+          from_addr: string | null
+          gmail_message_id: string
+          id: string
+          received_at: string
+          snippet: string | null
+          subject: string | null
+          type: Database["public"]["Enums"]["application_status"]
+          user_id: string
+        }
+        Insert: {
+          application_id?: string | null
+          created_at?: string
+          from_addr?: string | null
+          gmail_message_id: string
+          id?: string
+          received_at: string
+          snippet?: string | null
+          subject?: string | null
+          type: Database["public"]["Enums"]["application_status"]
+          user_id: string
+        }
+        Update: {
+          application_id?: string | null
+          created_at?: string
+          from_addr?: string | null
+          gmail_message_id?: string
+          id?: string
+          received_at?: string
+          snippet?: string | null
+          subject?: string | null
+          type?: Database["public"]["Enums"]["application_status"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_events_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "applications"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gmail_sync: {
+        Row: {
+          access_token: string | null
+          access_token_expires_at: string | null
+          created_at: string
+          gmail_address: string | null
+          last_history_id: string | null
+          last_synced_at: string | null
+          refresh_token: string
+          scan_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token?: string | null
+          access_token_expires_at?: string | null
+          created_at?: string
+          gmail_address?: string | null
+          last_history_id?: string | null
+          last_synced_at?: string | null
+          refresh_token: string
+          scan_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string | null
+          access_token_expires_at?: string | null
+          created_at?: string
+          gmail_address?: string | null
+          last_history_id?: string | null
+          last_synced_at?: string | null
+          refresh_token?: string
+          scan_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +159,12 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      application_status:
+        | "applied"
+        | "interview"
+        | "offer"
+        | "rejected"
+        | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +291,14 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      application_status: [
+        "applied",
+        "interview",
+        "offer",
+        "rejected",
+        "other",
+      ],
+    },
   },
 } as const
