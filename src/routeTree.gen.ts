@@ -10,33 +10,76 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicCronScanAllRouteImport } from './routes/api/public/cron/scan-all'
+import { Route as ApiAuthGmailStartRouteImport } from './routes/api/auth/gmail/start'
+import { Route as ApiAuthGmailCallbackRouteImport } from './routes/api/auth/gmail/callback'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicCronScanAllRoute = ApiPublicCronScanAllRouteImport.update({
+  id: '/api/public/cron/scan-all',
+  path: '/api/public/cron/scan-all',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthGmailStartRoute = ApiAuthGmailStartRouteImport.update({
+  id: '/api/auth/gmail/start',
+  path: '/api/auth/gmail/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthGmailCallbackRoute = ApiAuthGmailCallbackRouteImport.update({
+  id: '/api/auth/gmail/callback',
+  path: '/api/auth/gmail/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/auth/gmail/callback': typeof ApiAuthGmailCallbackRoute
+  '/api/auth/gmail/start': typeof ApiAuthGmailStartRoute
+  '/api/public/cron/scan-all': typeof ApiPublicCronScanAllRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/auth/gmail/callback': typeof ApiAuthGmailCallbackRoute
+  '/api/auth/gmail/start': typeof ApiAuthGmailStartRoute
+  '/api/public/cron/scan-all': typeof ApiPublicCronScanAllRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/auth/gmail/callback': typeof ApiAuthGmailCallbackRoute
+  '/api/auth/gmail/start': typeof ApiAuthGmailStartRoute
+  '/api/public/cron/scan-all': typeof ApiPublicCronScanAllRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/api/auth/gmail/callback'
+    | '/api/auth/gmail/start'
+    | '/api/public/cron/scan-all'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/api/auth/gmail/callback'
+    | '/api/auth/gmail/start'
+    | '/api/public/cron/scan-all'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/auth/gmail/callback'
+    | '/api/auth/gmail/start'
+    | '/api/public/cron/scan-all'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiAuthGmailCallbackRoute: typeof ApiAuthGmailCallbackRoute
+  ApiAuthGmailStartRoute: typeof ApiAuthGmailStartRoute
+  ApiPublicCronScanAllRoute: typeof ApiPublicCronScanAllRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +91,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/cron/scan-all': {
+      id: '/api/public/cron/scan-all'
+      path: '/api/public/cron/scan-all'
+      fullPath: '/api/public/cron/scan-all'
+      preLoaderRoute: typeof ApiPublicCronScanAllRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/gmail/start': {
+      id: '/api/auth/gmail/start'
+      path: '/api/auth/gmail/start'
+      fullPath: '/api/auth/gmail/start'
+      preLoaderRoute: typeof ApiAuthGmailStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/gmail/callback': {
+      id: '/api/auth/gmail/callback'
+      path: '/api/auth/gmail/callback'
+      fullPath: '/api/auth/gmail/callback'
+      preLoaderRoute: typeof ApiAuthGmailCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiAuthGmailCallbackRoute: ApiAuthGmailCallbackRoute,
+  ApiAuthGmailStartRoute: ApiAuthGmailStartRoute,
+  ApiPublicCronScanAllRoute: ApiPublicCronScanAllRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
