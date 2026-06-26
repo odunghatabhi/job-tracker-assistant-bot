@@ -9,38 +9,128 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as ApiPublicCronScanAllRouteImport } from './routes/api/public/cron/scan-all'
+import { Route as ApiAuthGmailStartRouteImport } from './routes/api/auth/gmail/start'
+import { Route as ApiAuthGmailCallbackRouteImport } from './routes/api/auth/gmail/callback'
 
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiPublicCronScanAllRoute = ApiPublicCronScanAllRouteImport.update({
+  id: '/api/public/cron/scan-all',
+  path: '/api/public/cron/scan-all',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthGmailStartRoute = ApiAuthGmailStartRouteImport.update({
+  id: '/api/auth/gmail/start',
+  path: '/api/auth/gmail/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthGmailCallbackRoute = ApiAuthGmailCallbackRouteImport.update({
+  id: '/api/auth/gmail/callback',
+  path: '/api/auth/gmail/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/auth/gmail/callback': typeof ApiAuthGmailCallbackRoute
+  '/api/auth/gmail/start': typeof ApiAuthGmailStartRoute
+  '/api/public/cron/scan-all': typeof ApiPublicCronScanAllRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/auth/gmail/callback': typeof ApiAuthGmailCallbackRoute
+  '/api/auth/gmail/start': typeof ApiAuthGmailStartRoute
+  '/api/public/cron/scan-all': typeof ApiPublicCronScanAllRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/auth': typeof AuthRoute
+  '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/auth/gmail/callback': typeof ApiAuthGmailCallbackRoute
+  '/api/auth/gmail/start': typeof ApiAuthGmailStartRoute
+  '/api/public/cron/scan-all': typeof ApiPublicCronScanAllRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/api/auth/gmail/callback'
+    | '/api/auth/gmail/start'
+    | '/api/public/cron/scan-all'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/api/auth/gmail/callback'
+    | '/api/auth/gmail/start'
+    | '/api/public/cron/scan-all'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/dashboard'
+    | '/api/auth/gmail/callback'
+    | '/api/auth/gmail/start'
+    | '/api/public/cron/scan-all'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AuthRoute: typeof AuthRoute
+  ApiAuthGmailCallbackRoute: typeof ApiAuthGmailCallbackRoute
+  ApiAuthGmailStartRoute: typeof ApiAuthGmailStartRoute
+  ApiPublicCronScanAllRoute: typeof ApiPublicCronScanAllRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,22 +138,56 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/dashboard': {
+      id: '/_authenticated/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/public/cron/scan-all': {
+      id: '/api/public/cron/scan-all'
+      path: '/api/public/cron/scan-all'
+      fullPath: '/api/public/cron/scan-all'
+      preLoaderRoute: typeof ApiPublicCronScanAllRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/gmail/start': {
+      id: '/api/auth/gmail/start'
+      path: '/api/auth/gmail/start'
+      fullPath: '/api/auth/gmail/start'
+      preLoaderRoute: typeof ApiAuthGmailStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/gmail/callback': {
+      id: '/api/auth/gmail/callback'
+      path: '/api/auth/gmail/callback'
+      fullPath: '/api/auth/gmail/callback'
+      preLoaderRoute: typeof ApiAuthGmailCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AuthRoute: AuthRoute,
+  ApiAuthGmailCallbackRoute: ApiAuthGmailCallbackRoute,
+  ApiAuthGmailStartRoute: ApiAuthGmailStartRoute,
+  ApiPublicCronScanAllRoute: ApiPublicCronScanAllRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
