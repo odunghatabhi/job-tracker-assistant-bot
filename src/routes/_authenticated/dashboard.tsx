@@ -80,6 +80,31 @@ const STATUS_META: Record<Status, { label: string; className: string }> = {
   other: { label: "Other", className: "bg-muted text-muted-foreground border" },
 };
 
+const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "2-digit",
+  timeZone: "UTC",
+});
+
+const DATE_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
+
+function formatDate(value: string) {
+  return DATE_FORMAT.format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return DATE_TIME_FORMAT.format(new Date(value));
+}
+
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [{ title: "Dashboard · JobTrail" }],
@@ -199,7 +224,7 @@ function DashboardPage() {
                 <div>
                   <div className="font-medium">{gmail.gmail_address}</div>
                   <div className="text-xs text-muted-foreground">
-                    Last scan: {gmail.last_synced_at ? new Date(gmail.last_synced_at).toLocaleString() : "never"}
+                    Last scan: {gmail.last_synced_at ? formatDateTime(gmail.last_synced_at) : "never"}
                     {!gmail.scan_enabled && " · scheduled scans paused"}
                   </div>
                 </div>
@@ -302,13 +327,13 @@ function DashboardPage() {
                     <TableRow key={a.id}>
                       <TableCell className="font-medium">{a.company}</TableCell>
                       <TableCell>{a.role}</TableCell>
-                      <TableCell>{new Date(a.applied_at).toLocaleDateString()}</TableCell>
+                      <TableCell>{formatDate(a.applied_at)}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={STATUS_META[a.status].className}>
                           {STATUS_META[a.status].label}
                         </Badge>
                       </TableCell>
-                      <TableCell>{new Date(a.last_status_at).toLocaleDateString()}</TableCell>
+                      <TableCell>{formatDate(a.last_status_at)}</TableCell>
                       <TableCell className="text-right">
                         <AppDialog
                           initial={a}
