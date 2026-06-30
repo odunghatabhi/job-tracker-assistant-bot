@@ -101,22 +101,52 @@ export interface GmailMessageLite {
   receivedAt: string;
 }
 
+function decodeBase64Url(s: string): string {
+  try {
+    const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+    // atob is available in the Worker runtime
+    const bin = atob(b64);
+    // Decode as UTF-8
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function extractBody(payload: any): string {
+  if (!payload) return "";
+  const parts: any[] = [];
+  const walk = (p: any) => {
+    if (!p) return;
+    if (p.body?.data) parts.push({ mime: p.mimeType, data: p.body.data });
+    if (Array.isArray(p.parts)) p.parts.forEach(walk);
+  };
+  walk(payload);
+  // Prefer text/plain, fall back to text/html stripped.
+  const plain = parts.find((p) => p.mime === "text/plain");
+  if (plain) return decodeBase64Url(plain.data);
+  const html = parts.find((p) => p.mime === "text/html");
+  if (html) return decodeBase64Url(html.data).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  if (parts[0]) return decodeBase64Url(parts[0].data);
+  return "";
+}
+
 export async function getMessageMeta(
   accessToken: string,
   id: string,
 ): Promise<GmailMessageLite | null> {
+  // Fetch full so we can read body text (rejection signals are often only in the body).
   const url = new URL(`${GMAIL_API}/messages/${id}`);
-  url.searchParams.set("format", "metadata");
-  url.searchParams.append("metadataHeaders", "Subject");
-  url.searchParams.append("metadataHeaders", "From");
-  url.searchParams.append("metadataHeaders", "Date");
+  url.searchParams.set("format", "full");
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) return null;
   const data = (await res.json()) as {
     id: string;
     snippet?: string;
     internalDate?: string;
-    payload?: { headers?: { name: string; value: string }[] };
+    payload?: { headers?: { name: string; value: string }[]; body?: any; parts?: any[]; mimeType?: string };
   };
   const headers = data.payload?.headers ?? [];
   const get = (n: string) =>
@@ -124,11 +154,13 @@ export async function getMessageMeta(
   const receivedAt = data.internalDate
     ? new Date(Number(data.internalDate)).toISOString()
     : new Date().toISOString();
+  const body = extractBody(data.payload).slice(0, 2000);
+  const snippet = (data.snippet ?? "") + (body ? "\n" + body : "");
   return {
     id: data.id,
     subject: get("Subject"),
     from: get("From"),
-    snippet: data.snippet ?? "",
+    snippet: snippet.slice(0, 2500),
     receivedAt,
   };
 }
@@ -140,21 +172,27 @@ export async function classifyEmails(
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
   if (emails.length === 0) return {};
 
-  const prompt = `You analyze emails to detect job application activity. For EACH email below, decide:
-- is_job: true only if the email is clearly about the recipient's own job application (application confirmation, interview invite/scheduling, offer, or rejection). Newsletters, job alerts, "jobs you might like" digests, marketing => false.
-- type: one of "applied" (application received/confirmation), "interview" (interview invite, scheduling, recruiter screen, assessment), "offer" (job offer extended), "rejected" (no longer moving forward / position filled), "other".
-- company: the hiring company name (clean, no suffixes like "Inc.", "Talent Team"). null if unclear.
-- role: the job title applied for. null if unclear.
-- applied_at_iso: only if this is an "applied" email, the application timestamp (use the email received time if not stated). Otherwise null.
-- confidence: 0..1.
+  const prompt = `You are a strict classifier of job-application emails. For EACH email below, decide:
+- is_job: true if the email is about the recipient's own job application lifecycle — application confirmation, interview invite/scheduling/reschedule, recruiter screen, online assessment, take-home, offer, OR rejection / "not moving forward" / "position filled" / "decided to pursue other candidates" / "unfortunately ... not selected". Newsletters, job alerts, "jobs you might like", marketing, generic recruiter outreach with no specific application => false.
+- type: EXACTLY one of:
+  * "applied"   — application received / "thank you for applying" / confirmation that an application was submitted.
+  * "interview" — interview invite, scheduling link, recruiter screen, technical/online assessment, take-home, hiring manager call, "next steps".
+  * "offer"     — a formal job offer is being extended.
+  * "rejected"  — application unsuccessful. Signals include: "unfortunately", "we regret", "not moving forward", "decided to move forward with other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration".
+  * "other"     — anything else, including pure marketing or generic job alerts.
+  Bias toward "rejected" when the email is clearly negative about the recipient's application even if the company doesn't explicitly say "rejected".
+- company: hiring company name only — strip suffixes ("Inc.", "Talent Acquisition Team", "Recruiting", "Careers"). Extract from From domain or signature if needed. null only if truly unknown.
+- role: the job title. For status updates (interview/offer/rejected), if the role is not in this email, still try to infer from subject ("Your application for X"), otherwise null — DO NOT invent.
+- applied_at_iso: only for type="applied". Use the email received time if not stated. Otherwise null.
+- confidence: 0..1. Use >=0.6 when subject/body clearly states the outcome.
 
-Return ONLY a JSON object {"results":[{"id":"...","is_job":..., "type":"...", "company":..., "role":..., "applied_at_iso":..., "confidence":...}, ...]} with one entry per email, in order.
+Return ONLY a JSON object: {"results":[{"id":"...","is_job":true,"type":"...","company":"...","role":"...","applied_at_iso":null,"confidence":0.9}, ...]} — one entry per email, in order.
 
 Emails:
 ${emails
   .map(
     (e, i) =>
-      `[${i}] id=${e.id}\nFrom: ${e.from}\nSubject: ${e.subject}\nReceived: ${e.receivedAt}\nSnippet: ${e.snippet}`,
+      `[${i}] id=${e.id}\nFrom: ${e.from}\nSubject: ${e.subject}\nReceived: ${e.receivedAt}\nBody: ${e.snippet}`,
   )
   .join("\n\n")}`;
 
@@ -250,9 +288,17 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
   const sinceDays = lastSynced
     ? Math.max(1, Math.ceil((Date.now() - lastSynced.getTime()) / 86_400_000) + 1)
     : 30;
-  const query = `newer_than:${sinceDays}d (application OR "thank you for applying" OR interview OR "next steps" OR "we regret" OR offer OR recruiter OR "your application")`;
+  const query = `newer_than:${sinceDays}d (` +
+    `application OR "thank you for applying" OR "your application" OR ` +
+    `interview OR "next steps" OR "online assessment" OR "take home" OR assessment OR ` +
+    `offer OR ` +
+    `"we regret" OR "unfortunately" OR "not moving forward" OR "position has been filled" OR ` +
+    `"other candidates" OR "not selected" OR "will not be proceeding" OR ` +
+    `"no longer under consideration" OR rejected OR ` +
+    `recruiter OR hiring` +
+    `)`;
 
-  const ids = await listMessageIds(accessToken!, query, 50);
+  const ids = await listMessageIds(accessToken!, query, 150);
 
   // Skip messages already processed
   const { data: existing } = await supabaseAdmin
@@ -284,8 +330,9 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         continue;
       }
       classified += 1;
-      if (!r.is_job || !r.company || !r.role) {
-        // Still record an event tagged "other" with no application link, so we don't re-scan it.
+
+      // Not a job email at all → record as "other" so we don't reprocess.
+      if (!r.is_job || !r.company) {
         await supabaseAdmin.from("email_events").insert({
           user_id: userId,
           application_id: null,
@@ -298,20 +345,51 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         });
         continue;
       }
-      const companyNorm = normalize(r.company);
-      const roleNorm = normalize(r.role);
 
-      // Find existing app
-      const { data: existingApp } = await supabaseAdmin
-        .from("applications")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("company_norm", companyNorm)
-        .eq("role_norm", roleNorm)
-        .maybeSingle();
+      const companyNorm = normalize(r.company);
+      const roleNorm = r.role ? normalize(r.role) : null;
+      const isStatusUpdate = r.type === "interview" || r.type === "offer" || r.type === "rejected";
+
+      // Find existing app. Prefer exact (company+role) match; for status updates
+      // without a role, fall back to most-recent app for this company.
+      let existingApp: any = null;
+      if (roleNorm) {
+        const { data } = await supabaseAdmin
+          .from("applications")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("company_norm", companyNorm)
+          .eq("role_norm", roleNorm)
+          .maybeSingle();
+        existingApp = data;
+      }
+      if (!existingApp && isStatusUpdate) {
+        const { data } = await supabaseAdmin
+          .from("applications")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("company_norm", companyNorm)
+          .order("applied_at", { ascending: false })
+          .limit(1);
+        existingApp = data?.[0] ?? null;
+      }
 
       let appId: string;
       if (!existingApp) {
+        // Need a role to create a new row. Skip status-update emails for unknown apps.
+        if (!roleNorm) {
+          await supabaseAdmin.from("email_events").insert({
+            user_id: userId,
+            application_id: null,
+            gmail_message_id: m.id,
+            received_at: m.receivedAt,
+            type: r.type,
+            subject: m.subject,
+            snippet: m.snippet,
+            from_addr: m.from,
+          });
+          continue;
+        }
         const appliedAt = r.applied_at_iso ?? m.receivedAt;
         const { data: ins, error: insErr } = await supabaseAdmin
           .from("applications")
@@ -319,10 +397,10 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
             user_id: userId,
             company: r.company,
             company_norm: companyNorm,
-            role: r.role,
-            role_norm: roleNorm,
+            role: r.role!,
+            role_norm: roleNorm!,
             applied_at: appliedAt,
-            status: r.type === "applied" ? "applied" : r.type,
+            status: r.type === "other" ? "applied" : r.type,
             last_status_at: m.receivedAt,
             last_email_id: m.id,
             source: "gmail",
@@ -337,7 +415,16 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         created += 1;
       } else {
         appId = existingApp.id as string;
-        if (shouldUpgradeStatus(existingApp.status as string, r.type)) {
+        // Recency wins: any newer status email overrides the stored status
+        // (except "other" / "applied" which never overrides a later stage).
+        const incomingTime = new Date(m.receivedAt).getTime();
+        const currentTime = new Date(existingApp.last_status_at as string).getTime();
+        const incomingRank = STATUS_RANK[r.type] ?? 0;
+        const currentRank = STATUS_RANK[existingApp.status as string] ?? 0;
+        const shouldUpdate =
+          isStatusUpdate &&
+          (incomingTime >= currentTime || incomingRank > currentRank);
+        if (shouldUpdate) {
           await supabaseAdmin
             .from("applications")
             .update({
@@ -362,6 +449,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
       });
     }
   }
+
 
   await supabaseAdmin
     .from("gmail_sync")
