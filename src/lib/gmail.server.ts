@@ -288,9 +288,17 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
   const sinceDays = lastSynced
     ? Math.max(1, Math.ceil((Date.now() - lastSynced.getTime()) / 86_400_000) + 1)
     : 30;
-  const query = `newer_than:${sinceDays}d (application OR "thank you for applying" OR interview OR "next steps" OR "we regret" OR offer OR recruiter OR "your application")`;
+  const query = `newer_than:${sinceDays}d (` +
+    `application OR "thank you for applying" OR "your application" OR ` +
+    `interview OR "next steps" OR "online assessment" OR "take home" OR assessment OR ` +
+    `offer OR ` +
+    `"we regret" OR "unfortunately" OR "not moving forward" OR "position has been filled" OR ` +
+    `"other candidates" OR "not selected" OR "will not be proceeding" OR ` +
+    `"no longer under consideration" OR rejected OR ` +
+    `recruiter OR hiring` +
+    `)`;
 
-  const ids = await listMessageIds(accessToken!, query, 50);
+  const ids = await listMessageIds(accessToken!, query, 150);
 
   // Skip messages already processed
   const { data: existing } = await supabaseAdmin
@@ -322,8 +330,9 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         continue;
       }
       classified += 1;
-      if (!r.is_job || !r.company || !r.role) {
-        // Still record an event tagged "other" with no application link, so we don't re-scan it.
+
+      // Not a job email at all → record as "other" so we don't reprocess.
+      if (!r.is_job || !r.company) {
         await supabaseAdmin.from("email_events").insert({
           user_id: userId,
           application_id: null,
@@ -336,20 +345,51 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         });
         continue;
       }
-      const companyNorm = normalize(r.company);
-      const roleNorm = normalize(r.role);
 
-      // Find existing app
-      const { data: existingApp } = await supabaseAdmin
-        .from("applications")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("company_norm", companyNorm)
-        .eq("role_norm", roleNorm)
-        .maybeSingle();
+      const companyNorm = normalize(r.company);
+      const roleNorm = r.role ? normalize(r.role) : null;
+      const isStatusUpdate = r.type === "interview" || r.type === "offer" || r.type === "rejected";
+
+      // Find existing app. Prefer exact (company+role) match; for status updates
+      // without a role, fall back to most-recent app for this company.
+      let existingApp: any = null;
+      if (roleNorm) {
+        const { data } = await supabaseAdmin
+          .from("applications")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("company_norm", companyNorm)
+          .eq("role_norm", roleNorm)
+          .maybeSingle();
+        existingApp = data;
+      }
+      if (!existingApp && isStatusUpdate) {
+        const { data } = await supabaseAdmin
+          .from("applications")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("company_norm", companyNorm)
+          .order("applied_at", { ascending: false })
+          .limit(1);
+        existingApp = data?.[0] ?? null;
+      }
 
       let appId: string;
       if (!existingApp) {
+        // Need a role to create a new row. Skip status-update emails for unknown apps.
+        if (!roleNorm) {
+          await supabaseAdmin.from("email_events").insert({
+            user_id: userId,
+            application_id: null,
+            gmail_message_id: m.id,
+            received_at: m.receivedAt,
+            type: r.type,
+            subject: m.subject,
+            snippet: m.snippet,
+            from_addr: m.from,
+          });
+          continue;
+        }
         const appliedAt = r.applied_at_iso ?? m.receivedAt;
         const { data: ins, error: insErr } = await supabaseAdmin
           .from("applications")
@@ -360,7 +400,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
             role: r.role,
             role_norm: roleNorm,
             applied_at: appliedAt,
-            status: r.type === "applied" ? "applied" : r.type,
+            status: r.type === "other" ? "applied" : r.type,
             last_status_at: m.receivedAt,
             last_email_id: m.id,
             source: "gmail",
@@ -375,7 +415,16 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         created += 1;
       } else {
         appId = existingApp.id as string;
-        if (shouldUpgradeStatus(existingApp.status as string, r.type)) {
+        // Recency wins: any newer status email overrides the stored status
+        // (except "other" / "applied" which never overrides a later stage).
+        const incomingTime = new Date(m.receivedAt).getTime();
+        const currentTime = new Date(existingApp.last_status_at as string).getTime();
+        const incomingRank = STATUS_RANK[r.type] ?? 0;
+        const currentRank = STATUS_RANK[existingApp.status as string] ?? 0;
+        const shouldUpdate =
+          isStatusUpdate &&
+          (incomingTime >= currentTime || incomingRank > currentRank);
+        if (shouldUpdate) {
           await supabaseAdmin
             .from("applications")
             .update({
@@ -400,6 +449,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
       });
     }
   }
+
 
   await supabaseAdmin
     .from("gmail_sync")
