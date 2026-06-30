@@ -84,11 +84,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "Auto-track your job applications from Gmail with AI." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "JobTrail" },
+      { name: "twitter:description", content: "Auto-track your job applications from Gmail with AI." },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "icon",
+        href: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f172a'/%3E%3Cpath d='M20 24h24v24H20z' fill='%233b82f6'/%3E%3Cpath d='M25 24v-5a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v5' fill='none' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E",
       },
     ],
   }),
