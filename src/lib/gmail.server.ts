@@ -101,22 +101,52 @@ export interface GmailMessageLite {
   receivedAt: string;
 }
 
+function decodeBase64Url(s: string): string {
+  try {
+    const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+    // atob is available in the Worker runtime
+    const bin = atob(b64);
+    // Decode as UTF-8
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function extractBody(payload: any): string {
+  if (!payload) return "";
+  const parts: any[] = [];
+  const walk = (p: any) => {
+    if (!p) return;
+    if (p.body?.data) parts.push({ mime: p.mimeType, data: p.body.data });
+    if (Array.isArray(p.parts)) p.parts.forEach(walk);
+  };
+  walk(payload);
+  // Prefer text/plain, fall back to text/html stripped.
+  const plain = parts.find((p) => p.mime === "text/plain");
+  if (plain) return decodeBase64Url(plain.data);
+  const html = parts.find((p) => p.mime === "text/html");
+  if (html) return decodeBase64Url(html.data).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  if (parts[0]) return decodeBase64Url(parts[0].data);
+  return "";
+}
+
 export async function getMessageMeta(
   accessToken: string,
   id: string,
 ): Promise<GmailMessageLite | null> {
+  // Fetch full so we can read body text (rejection signals are often only in the body).
   const url = new URL(`${GMAIL_API}/messages/${id}`);
-  url.searchParams.set("format", "metadata");
-  url.searchParams.append("metadataHeaders", "Subject");
-  url.searchParams.append("metadataHeaders", "From");
-  url.searchParams.append("metadataHeaders", "Date");
+  url.searchParams.set("format", "full");
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) return null;
   const data = (await res.json()) as {
     id: string;
     snippet?: string;
     internalDate?: string;
-    payload?: { headers?: { name: string; value: string }[] };
+    payload?: { headers?: { name: string; value: string }[]; body?: any; parts?: any[]; mimeType?: string };
   };
   const headers = data.payload?.headers ?? [];
   const get = (n: string) =>
@@ -124,11 +154,13 @@ export async function getMessageMeta(
   const receivedAt = data.internalDate
     ? new Date(Number(data.internalDate)).toISOString()
     : new Date().toISOString();
+  const body = extractBody(data.payload).slice(0, 2000);
+  const snippet = (data.snippet ?? "") + (body ? "\n" + body : "");
   return {
     id: data.id,
     subject: get("Subject"),
     from: get("From"),
-    snippet: data.snippet ?? "",
+    snippet: snippet.slice(0, 2500),
     receivedAt,
   };
 }
