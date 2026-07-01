@@ -424,7 +424,8 @@ async function reconcileUnlinkedEvents(
     .order("received_at", { ascending: true })
     .limit(120);
 
-  const messages: GmailMessageLite[] = (events ?? []).map((event: any) => ({
+  const eventRows = (events ?? []) as any[];
+  const messages: GmailMessageLite[] = eventRows.map((event: any) => ({
     id: event.gmail_message_id,
     subject: event.subject ?? "",
     from: event.from_addr ?? "",
@@ -440,7 +441,7 @@ async function reconcileUnlinkedEvents(
     const results = await classifyEmails(batch);
     for (let j = 0; j < batch.length; j += 1) {
       const message = batch[j];
-      const event = events[i + j];
+      const event = eventRows[i + j];
       const result = enhanceClassification(message, results[message.id]);
       classified += 1;
       if (!result.is_job || result.type === "other") {
