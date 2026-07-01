@@ -101,6 +101,18 @@ export interface GmailMessageLite {
   receivedAt: string;
 }
 
+type ApplicationRow = {
+  id: string;
+  company: string;
+  company_norm: string;
+  role: string;
+  role_norm: string;
+  applied_at: string;
+  status: string;
+  last_status_at: string;
+  last_email_id?: string | null;
+};
+
 function decodeBase64Url(s: string): string {
   try {
     const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
@@ -181,7 +193,7 @@ export async function classifyEmails(
   * "rejected"  — application unsuccessful. English: "unfortunately", "we regret", "not moving forward", "other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration". German: "leider", "Absage", "leider müssen wir Ihnen absagen", "haben wir uns gegen Sie entschieden", "andere Bewerber", "nicht weiter berücksichtigen", "nicht in die engere Auswahl", "Ihre Bewerbung nicht weiterverfolgen".
   * "other"     — anything else, including marketing or generic job alerts.
   Bias toward "rejected" when the email is clearly negative about the recipient's application, in any language.
-- company: hiring company name only — strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). Extract from From domain or signature if needed. null only if truly unknown.
+- company: hiring company name only — NOT the applicant-tracking platform. If sender/body mentions Workday, Greenhouse, Lever, Personio, SmartRecruiters, Teamtailor, Ashby, Recruitee, Taleo, SuccessFactors, BambooHR, or Workable, extract the employer/customer company instead. Strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). Extract from subject/body/signature/from domain if needed. null only if truly unknown.
 - role: the job title. For status updates without a role in this email, try subject ("Your application for X" / "Ihre Bewerbung als X"), otherwise null — do not invent.
 - applied_at_iso: only for type="applied". Use the email received time if not stated. Otherwise null.
 - confidence: 0..1. Use >=0.6 when subject/body clearly states the outcome.
@@ -246,6 +258,222 @@ export function shouldUpgradeStatus(current: string, incoming: string): boolean 
   return (STATUS_RANK[incoming] ?? 0) >= (STATUS_RANK[current] ?? 0);
 }
 
+function isStatusUpdateType(type: string): boolean {
+  return type === "interview" || type === "offer" || type === "rejected";
+}
+
+const COMPANY_STOPWORDS = new Set([
+  "inc", "incorporated", "llc", "ltd", "limited", "gmbh", "ag", "se", "sa", "sas", "bv", "nv",
+  "kg", "ohg", "ug", "co", "company", "group", "holding", "holdings", "careers", "career", "jobs",
+  "job", "recruiting", "recruitment", "talent", "acquisition", "personalabteilung", "personal", "hr",
+  "human", "resources", "team", "noreply", "reply", "workday", "greenhouse", "lever", "smartrecruiters",
+  "smart", "recruiters", "personio", "ashby", "recruitee", "taleo", "successfactors", "success",
+  "factors", "bamboohr", "bamboo", "workable", "teamtailor", "join", "mail", "email", "com", "de",
+  "eu", "io", "net", "org",
+]);
+
+const ROLE_STOPWORDS = new Set([
+  "job", "role", "position", "application", "bewerbung", "stelle", "stellenangebot", "als", "fur", "for",
+  "the", "and", "und", "m", "w", "d", "f", "x", "all", "gender", "remote", "hybrid", "onsite",
+]);
+
+function tokenSet(value: string | null | undefined, stopwords = new Set<string>()): Set<string> {
+  return new Set(
+    normalize(value)
+      .split(/\s+/)
+      .filter((token) => token.length > 1 && !stopwords.has(token)),
+  );
+}
+
+function overlapScore(aValue: string | null | undefined, bValue: string | null | undefined, stopwords: Set<string>): number {
+  const a = tokenSet(aValue, stopwords);
+  const b = tokenSet(bValue, stopwords);
+  if (!a.size || !b.size) return 0;
+  const aText = [...a].join(" ");
+  const bText = [...b].join(" ");
+  if (aText === bText || aText.includes(bText) || bText.includes(aText)) return 1;
+  let hits = 0;
+  for (const token of a) if (b.has(token)) hits += 1;
+  return hits / Math.min(a.size, b.size);
+}
+
+function normalizedEmailText(message: GmailMessageLite): string {
+  return normalize(`${message.from}\n${message.subject}\n${message.snippet}`);
+}
+
+function emailDomainTokens(from: string): Set<string> {
+  const domain = from.match(/@([^>\s]+)/)?.[1]?.split("@").pop() ?? "";
+  const withoutTld = domain.split(".").slice(0, -1).join(" ").replace(/[-_]/g, " ");
+  return tokenSet(withoutTld, COMPANY_STOPWORDS);
+}
+
+function messageMentionsCompany(app: ApplicationRow, normalizedText: string): boolean {
+  const companyText = normalize(app.company);
+  if (companyText.length >= 4 && normalizedText.includes(companyText)) return true;
+  const tokens = [...tokenSet(app.company, COMPANY_STOPWORDS)].filter((token) => token.length >= 4);
+  if (!tokens.length) return false;
+  const hits = tokens.filter((token) => normalizedText.includes(token)).length;
+  return hits >= Math.min(2, tokens.length);
+}
+
+function detectLifecycleType(message: GmailMessageLite): ClassifiedEmail["type"] | null {
+  const text = normalizedEmailText(message);
+  const has = (...phrases: string[]) => phrases.some((phrase) => text.includes(normalize(phrase)));
+  if (has(
+    "not moving forward", "moving forward with other candidates", "other candidates", "not selected",
+    "will not be proceeding", "no longer under consideration", "position has been filled", "we regret",
+    "unfortunately", "unsuccessful", "leider", "absage", "nicht weiter berucksichtigen",
+    "nicht berucksichtigen", "nicht in die engere auswahl", "gegen sie entschieden", "andere bewerber",
+    "andere kandidaten", "bewerbung nicht weiterverfolgen", "konnen ihnen keine positive ruckmeldung",
+  )) return "rejected";
+  if (has(
+    "interview", "recruiter screen", "phone screen", "next steps", "schedule a call", "assessment",
+    "take home", "vorstellungsgesprach", "kennenlerngesprach", "gesprach", "termin", "nachste schritte",
+  )) return "interview";
+  if (has("offer", "job offer", "employment offer", "vertragsangebot", "zusage", "angebot")) return "offer";
+  if (has(
+    "thank you for applying", "your application has been received", "application received", "we received your application",
+    "vielen dank fur ihre bewerbung", "bewerbung erhalten", "eingangsbestatigung", "haben ihre bewerbung erhalten",
+  )) return "applied";
+  return null;
+}
+
+function enhanceClassification(message: GmailMessageLite, result?: ClassifiedEmail): ClassifiedEmail {
+  const forcedType = detectLifecycleType(message);
+  const base = result ?? {
+    is_job: false,
+    type: "other" as const,
+    company: null,
+    role: null,
+    applied_at_iso: null,
+    confidence: 0,
+  };
+  if (!forcedType) return base;
+  if (forcedType === "rejected" || !base.is_job || base.type === "other" || base.confidence < 0.7) {
+    return {
+      ...base,
+      is_job: true,
+      type: forcedType,
+      confidence: Math.max(base.confidence, forcedType === "rejected" ? 0.9 : 0.78),
+    };
+  }
+  return base;
+}
+
+function findBestApplication(apps: ApplicationRow[], result: ClassifiedEmail, message: GmailMessageLite): ApplicationRow | null {
+  if (!apps.length) return null;
+  const text = normalizedEmailText(message);
+  const domainTokens = emailDomainTokens(message.from);
+  const incomingAt = new Date(message.receivedAt).getTime();
+  const scored = apps
+    .map((app) => {
+      const companyScore = result.company ? overlapScore(result.company, app.company, COMPANY_STOPWORDS) : 0;
+      const mentionedCompany = messageMentionsCompany(app, text);
+      const appCompanyTokens = tokenSet(app.company, COMPANY_STOPWORDS);
+      let domainHits = 0;
+      for (const token of domainTokens) if (appCompanyTokens.has(token)) domainHits += 1;
+      const domainScore = domainTokens.size && appCompanyTokens.size ? domainHits / Math.min(domainTokens.size, appCompanyTokens.size) : 0;
+
+      if (companyScore < 0.5 && !mentionedCompany && domainScore < 0.75) return null;
+
+      const roleScore = result.role ? overlapScore(result.role, app.role, ROLE_STOPWORDS) : 0;
+      if (result.role && roleScore < 0.35 && !isStatusUpdateType(result.type)) return null;
+
+      const appliedAt = new Date(app.applied_at).getTime();
+      const daysSinceApplied = Math.max(0, (incomingAt - appliedAt) / 86_400_000);
+      const statusAfterApplicationBonus = appliedAt <= incomingAt + 2 * 86_400_000 ? 1.25 : -2;
+      const recencyPenalty = Math.min(2, daysSinceApplied / 120);
+      const score =
+        companyScore * 6 +
+        (mentionedCompany ? 3 : 0) +
+        domainScore * 2 +
+        roleScore * 3 +
+        statusAfterApplicationBonus -
+        recencyPenalty;
+      return { app, score };
+    })
+    .filter((row): row is { app: ApplicationRow; score: number } => !!row)
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (!best) return null;
+  return best.score >= (result.company ? 3.5 : 3.25) ? best.app : null;
+}
+
+function shouldApplyStatusUpdate(app: ApplicationRow, incomingType: string, receivedAt: string): boolean {
+  if (!isStatusUpdateType(incomingType)) return false;
+  const incomingTime = new Date(receivedAt).getTime();
+  const currentTime = new Date(app.last_status_at).getTime();
+  const incomingRank = STATUS_RANK[incomingType] ?? 0;
+  const currentRank = STATUS_RANK[app.status] ?? 0;
+  return incomingTime >= currentTime || incomingRank > currentRank;
+}
+
+async function reconcileUnlinkedEvents(
+  supabaseAdmin: any,
+  userId: string,
+  knownApps: ApplicationRow[],
+): Promise<{ classified: number; updated: number; skipped: number }> {
+  const cutoff = new Date(Date.now() - 180 * 86_400_000).toISOString();
+  const { data: events } = await supabaseAdmin
+    .from("email_events")
+    .select("id,gmail_message_id,received_at,type,subject,snippet,from_addr")
+    .eq("user_id", userId)
+    .is("application_id", null)
+    .gte("received_at", cutoff)
+    .order("received_at", { ascending: true })
+    .limit(120);
+
+  const eventRows = (events ?? []) as any[];
+  const messages: GmailMessageLite[] = eventRows.map((event: any) => ({
+    id: event.gmail_message_id,
+    subject: event.subject ?? "",
+    from: event.from_addr ?? "",
+    snippet: event.snippet ?? "",
+    receivedAt: event.received_at,
+  }));
+
+  let classified = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (let i = 0; i < messages.length; i += 10) {
+    const batch = messages.slice(i, i + 10);
+    const results = await classifyEmails(batch);
+    for (let j = 0; j < batch.length; j += 1) {
+      const message = batch[j];
+      const event = eventRows[i + j];
+      const result = enhanceClassification(message, results[message.id]);
+      classified += 1;
+      if (!result.is_job || result.type === "other") {
+        skipped += 1;
+        continue;
+      }
+      const app = findBestApplication(knownApps, result, message);
+      if (!app) {
+        skipped += 1;
+        continue;
+      }
+      await supabaseAdmin
+        .from("email_events")
+        .update({ application_id: app.id, type: result.type })
+        .eq("id", event.id)
+        .eq("user_id", userId);
+      if (shouldApplyStatusUpdate(app, result.type, message.receivedAt)) {
+        await supabaseAdmin
+          .from("applications")
+          .update({ status: result.type, last_status_at: message.receivedAt, last_email_id: message.id })
+          .eq("id", app.id)
+          .eq("user_id", userId);
+        app.status = result.type;
+        app.last_status_at = message.receivedAt;
+        app.last_email_id = message.id;
+        updated += 1;
+      }
+    }
+  }
+  return { classified, updated, skipped };
+}
+
 export interface SyncResult {
   scanned: number;
   classified: number;
@@ -286,8 +514,8 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
   // Search query — keep it broad enough to catch real job-app mail, narrow enough to limit volume.
   const lastSynced = sync.last_synced_at ? new Date(sync.last_synced_at as string) : null;
   const sinceDays = lastSynced
-    ? Math.max(1, Math.ceil((Date.now() - lastSynced.getTime()) / 86_400_000) + 1)
-    : 30;
+    ? Math.max(45, Math.ceil((Date.now() - lastSynced.getTime()) / 86_400_000) + 7)
+    : 180;
   const query = `newer_than:${sinceDays}d (` +
     // English
     `application OR "thank you for applying" OR "your application" OR ` +
@@ -305,7 +533,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
     `Personalabteilung OR Recruiting` +
     `)`;
 
-  const ids = await listMessageIds(accessToken!, query, 100);
+  const ids = await listMessageIds(accessToken!, query, 200);
 
   // Skip messages already processed
   const { data: existing } = await supabaseAdmin
@@ -324,6 +552,15 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
     const results = await Promise.all(chunk.map((id) => getMessageMeta(accessToken!, id)));
     for (const m of results) if (m) messages.push(m);
   }
+  messages.sort((a, b) => new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime());
+
+  const { data: existingApps } = await supabaseAdmin
+    .from("applications")
+    .select("*")
+    .eq("user_id", userId)
+    .order("applied_at", { ascending: false })
+    .limit(500);
+  const knownApps = ((existingApps ?? []) as ApplicationRow[]).slice();
 
   // Classify in batches of 10
   let created = 0;
@@ -334,7 +571,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
     const batch = messages.slice(i, i + 10);
     const results = await classifyEmails(batch);
     for (const m of batch) {
-      const r = results[m.id];
+      const r = enhanceClassification(m, results[m.id]);
       if (!r) {
         skipped += 1;
         continue;
@@ -342,7 +579,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
       classified += 1;
 
       // Not a job email at all → record as "other" so we don't reprocess.
-      if (!r.is_job || !r.company) {
+      if (!r.is_job || (!r.company && !isStatusUpdateType(r.type))) {
         await supabaseAdmin.from("email_events").insert({
           user_id: userId,
           application_id: null,
@@ -356,38 +593,14 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         continue;
       }
 
-      const companyNorm = normalize(r.company);
+      const companyNorm = r.company ? normalize(r.company) : "";
       const roleNorm = r.role ? normalize(r.role) : null;
-      const isStatusUpdate = r.type === "interview" || r.type === "offer" || r.type === "rejected";
-
-      // Find existing app. Prefer exact (company+role) match; for status updates
-      // without a role, fall back to most-recent app for this company.
-      let existingApp: any = null;
-      if (roleNorm) {
-        const { data } = await supabaseAdmin
-          .from("applications")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("company_norm", companyNorm)
-          .eq("role_norm", roleNorm)
-          .maybeSingle();
-        existingApp = data;
-      }
-      if (!existingApp && isStatusUpdate) {
-        const { data } = await supabaseAdmin
-          .from("applications")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("company_norm", companyNorm)
-          .order("applied_at", { ascending: false })
-          .limit(1);
-        existingApp = data?.[0] ?? null;
-      }
+      const existingApp = findBestApplication(knownApps, r, m);
 
       let appId: string;
       if (!existingApp) {
         // Need a role to create a new row. Skip status-update emails for unknown apps.
-        if (!roleNorm) {
+        if (!r.company || !roleNorm) {
           await supabaseAdmin.from("email_events").insert({
             user_id: userId,
             application_id: null,
@@ -415,26 +628,18 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
             last_email_id: m.id,
             source: "gmail",
           })
-          .select("id")
+          .select("*")
           .single();
         if (insErr) {
           skipped += 1;
           continue;
         }
         appId = ins.id as string;
+        knownApps.unshift(ins as ApplicationRow);
         created += 1;
       } else {
         appId = existingApp.id as string;
-        // Recency wins: any newer status email overrides the stored status
-        // (except "other" / "applied" which never overrides a later stage).
-        const incomingTime = new Date(m.receivedAt).getTime();
-        const currentTime = new Date(existingApp.last_status_at as string).getTime();
-        const incomingRank = STATUS_RANK[r.type] ?? 0;
-        const currentRank = STATUS_RANK[existingApp.status as string] ?? 0;
-        const shouldUpdate =
-          isStatusUpdate &&
-          (incomingTime >= currentTime || incomingRank > currentRank);
-        if (shouldUpdate) {
+        if (shouldApplyStatusUpdate(existingApp, r.type, m.receivedAt)) {
           await supabaseAdmin
             .from("applications")
             .update({
@@ -443,6 +648,9 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
               last_email_id: m.id,
             })
             .eq("id", appId);
+          existingApp.status = r.type;
+          existingApp.last_status_at = m.receivedAt;
+          existingApp.last_email_id = m.id;
           updated += 1;
         }
       }
@@ -459,6 +667,11 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
       });
     }
   }
+
+  const repaired = await reconcileUnlinkedEvents(supabaseAdmin, userId, knownApps);
+  classified += repaired.classified;
+  updated += repaired.updated;
+  skipped += repaired.skipped;
 
 
   await supabaseAdmin
