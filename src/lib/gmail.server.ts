@@ -172,17 +172,17 @@ export async function classifyEmails(
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
   if (emails.length === 0) return {};
 
-  const prompt = `You are a strict classifier of job-application emails. For EACH email below, decide:
-- is_job: true if the email is about the recipient's own job application lifecycle — application confirmation, interview invite/scheduling/reschedule, recruiter screen, online assessment, take-home, offer, OR rejection / "not moving forward" / "position filled" / "decided to pursue other candidates" / "unfortunately ... not selected". Newsletters, job alerts, "jobs you might like", marketing, generic recruiter outreach with no specific application => false.
+  const prompt = `You are a strict multilingual classifier of job-application emails (English AND German — Bewerbung, Vorstellungsgespräch, Absage, Zusage, etc.). For EACH email below, decide:
+- is_job: true if the email is about the recipient's own job application lifecycle — application confirmation, interview invite/scheduling/reschedule, recruiter screen, online assessment, take-home, offer, OR rejection. Newsletters, job alerts, "jobs you might like", marketing, generic recruiter outreach with no specific application => false.
 - type: EXACTLY one of:
-  * "applied"   — application received / "thank you for applying" / confirmation that an application was submitted.
-  * "interview" — interview invite, scheduling link, recruiter screen, technical/online assessment, take-home, hiring manager call, "next steps".
-  * "offer"     — a formal job offer is being extended.
-  * "rejected"  — application unsuccessful. Signals include: "unfortunately", "we regret", "not moving forward", "decided to move forward with other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration".
-  * "other"     — anything else, including pure marketing or generic job alerts.
-  Bias toward "rejected" when the email is clearly negative about the recipient's application even if the company doesn't explicitly say "rejected".
-- company: hiring company name only — strip suffixes ("Inc.", "Talent Acquisition Team", "Recruiting", "Careers"). Extract from From domain or signature if needed. null only if truly unknown.
-- role: the job title. For status updates (interview/offer/rejected), if the role is not in this email, still try to infer from subject ("Your application for X"), otherwise null — DO NOT invent.
+  * "applied"   — application received / "thank you for applying" / "Eingangsbestätigung" / "Wir haben Ihre Bewerbung erhalten" / "Vielen Dank für Ihre Bewerbung".
+  * "interview" — interview invite, scheduling, recruiter screen, assessment, take-home, "next steps" / "Einladung zum Vorstellungsgespräch" / "Interview" / "Kennenlerngespräch" / "nächste Schritte".
+  * "offer"     — formal job offer / "Vertragsangebot" / "Zusage" / "Angebot".
+  * "rejected"  — application unsuccessful. English: "unfortunately", "we regret", "not moving forward", "other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration". German: "leider", "Absage", "leider müssen wir Ihnen absagen", "haben wir uns gegen Sie entschieden", "andere Bewerber", "nicht weiter berücksichtigen", "nicht in die engere Auswahl", "Ihre Bewerbung nicht weiterverfolgen".
+  * "other"     — anything else, including marketing or generic job alerts.
+  Bias toward "rejected" when the email is clearly negative about the recipient's application, in any language.
+- company: hiring company name only — strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). Extract from From domain or signature if needed. null only if truly unknown.
+- role: the job title. For status updates without a role in this email, try subject ("Your application for X" / "Ihre Bewerbung als X"), otherwise null — do not invent.
 - applied_at_iso: only for type="applied". Use the email received time if not stated. Otherwise null.
 - confidence: 0..1. Use >=0.6 when subject/body clearly states the outcome.
 
