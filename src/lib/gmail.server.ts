@@ -289,16 +289,23 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
     ? Math.max(1, Math.ceil((Date.now() - lastSynced.getTime()) / 86_400_000) + 1)
     : 30;
   const query = `newer_than:${sinceDays}d (` +
+    // English
     `application OR "thank you for applying" OR "your application" OR ` +
     `interview OR "next steps" OR "online assessment" OR "take home" OR assessment OR ` +
     `offer OR ` +
     `"we regret" OR "unfortunately" OR "not moving forward" OR "position has been filled" OR ` +
     `"other candidates" OR "not selected" OR "will not be proceeding" OR ` +
     `"no longer under consideration" OR rejected OR ` +
-    `recruiter OR hiring` +
+    `recruiter OR hiring OR ` +
+    // German
+    `Bewerbung OR Eingangsbestätigung OR "Vielen Dank für Ihre Bewerbung" OR ` +
+    `Vorstellungsgespräch OR Kennenlerngespräch OR Interview OR "nächste Schritte" OR ` +
+    `Zusage OR Vertragsangebot OR Angebot OR ` +
+    `Absage OR leider OR "andere Bewerber" OR "nicht berücksichtigen" OR "engere Auswahl" OR ` +
+    `Personalabteilung OR Recruiting` +
     `)`;
 
-  const ids = await listMessageIds(accessToken!, query, 150);
+  const ids = await listMessageIds(accessToken!, query, 100);
 
   // Skip messages already processed
   const { data: existing } = await supabaseAdmin
@@ -309,10 +316,13 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
   const seen = new Set((existing ?? []).map((r) => r.gmail_message_id));
   const newIds = ids.filter((id) => !seen.has(id));
 
+  // Fetch message bodies in parallel chunks (much faster than sequential).
   const messages: GmailMessageLite[] = [];
-  for (const id of newIds) {
-    const m = await getMessageMeta(accessToken!, id);
-    if (m) messages.push(m);
+  const CHUNK = 10;
+  for (let i = 0; i < newIds.length; i += CHUNK) {
+    const chunk = newIds.slice(i, i + CHUNK);
+    const results = await Promise.all(chunk.map((id) => getMessageMeta(accessToken!, id)));
+    for (const m of results) if (m) messages.push(m);
   }
 
   // Classify in batches of 10
