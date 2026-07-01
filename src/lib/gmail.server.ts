@@ -397,7 +397,7 @@ function findBestApplication(apps: ApplicationRow[], result: ClassifiedEmail, me
 
   const best = scored[0];
   if (!best) return null;
-  return best.score >= (result.company ? 3.5 : 4.25) ? best.app : null;
+  return best.score >= (result.company ? 3.5 : 3.25) ? best.app : null;
 }
 
 function shouldApplyStatusUpdate(app: ApplicationRow, incomingType: string, receivedAt: string): boolean {
