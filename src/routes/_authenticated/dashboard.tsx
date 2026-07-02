@@ -9,6 +9,8 @@ import {
   upsertApplication,
   deleteApplication,
   disconnectGmail,
+  getSettings,
+  saveSettings,
 } from "@/lib/job-tracker.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -40,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Briefcase,
@@ -260,106 +263,281 @@ function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <StatCard label="Total" value={stats.total} />
-          <StatCard label="Applied" value={stats.by.applied} />
-          <StatCard label="Interview" value={stats.by.interview} />
-          <StatCard label="Offer" value={stats.by.offer} accent="text-emerald-500" />
-          <StatCard label="Rejected" value={stats.by.rejected} accent="text-rose-500" />
-        </div>
+        <Tabs defaultValue="apps" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="apps">Applications</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
 
-        {/* Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Status breakdown</CardTitle>
-            <CardDescription>Where your applications are right now.</CardDescription>
-          </CardHeader>
-          <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="status" stroke="var(--muted-foreground)" />
-                <YAxis allowDecimals={false} stroke="var(--muted-foreground)" />
-                <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
-                <Bar dataKey="count" fill="var(--primary)" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* Table */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Applications</CardTitle>
-              <CardDescription>Auto-detected from your inbox. Edit anything the AI got wrong.</CardDescription>
+          <TabsContent value="apps" className="space-y-6">
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+              <StatCard label="Total" value={stats.total} />
+              <StatCard label="Applied" value={stats.by.applied} />
+              <StatCard label="Interview" value={stats.by.interview} />
+              <StatCard label="Offer" value={stats.by.offer} accent="text-emerald-500" />
+              <StatCard label="Rejected" value={stats.by.rejected} accent="text-rose-500" />
             </div>
-            <AppDialog
-              onSave={async (form) => {
-                await fetchUpsert({ data: form });
-                qc.invalidateQueries({ queryKey: ["dashboard"] });
-              }}
-              trigger={<Button><Plus className="mr-2 h-4 w-4" /> Add</Button>}
-            />
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="py-10 text-center text-muted-foreground">Loading…</div>
-            ) : apps.length === 0 ? (
-              <div className="py-10 text-center text-muted-foreground">
-                No applications yet. Connect Gmail and hit “Sync now”, or add one manually.
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Applied</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Last update</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {apps.map((a) => (
-                    <TableRow key={a.id}>
-                      <TableCell className="font-medium">{a.company}</TableCell>
-                      <TableCell>{a.role}</TableCell>
-                      <TableCell>{formatDate(a.applied_at)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={STATUS_META[a.status].className}>
-                          {STATUS_META[a.status].label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{formatDate(a.last_status_at)}</TableCell>
-                      <TableCell className="text-right">
-                        <AppDialog
-                          initial={a}
-                          onSave={async (form) => {
-                            await fetchUpsert({ data: { ...form, id: a.id } });
-                            qc.invalidateQueries({ queryKey: ["dashboard"] });
-                          }}
-                          trigger={
-                            <Button variant="ghost" size="icon">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          }
-                        />
-                        <Button variant="ghost" size="icon" onClick={() => deleteMut.mutate(a.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+
+            {/* Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Status breakdown</CardTitle>
+                <CardDescription>Where your applications are right now.</CardDescription>
+              </CardHeader>
+              <CardContent className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="status" stroke="var(--muted-foreground)" />
+                    <YAxis allowDecimals={false} stroke="var(--muted-foreground)" />
+                    <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
+                    <Bar dataKey="count" fill="var(--primary)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Applications</CardTitle>
+                  <CardDescription>Auto-detected from your inbox. Edit anything the AI got wrong.</CardDescription>
+                </div>
+                <AppDialog
+                  onSave={async (form) => {
+                    await fetchUpsert({ data: form });
+                    qc.invalidateQueries({ queryKey: ["dashboard"] });
+                  }}
+                  trigger={<Button><Plus className="mr-2 h-4 w-4" /> Add</Button>}
+                />
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="py-10 text-center text-muted-foreground">Loading…</div>
+                ) : apps.length === 0 ? (
+                  <div className="py-10 text-center text-muted-foreground">
+                    No applications yet. Connect Gmail and hit "Sync now", or add one manually.
+                  </div>
+                ) : (
+                  <ApplicationsTable
+                    apps={apps}
+                    onEditSave={async (id, form) => {
+                      await fetchUpsert({ data: { ...form, id } });
+                      qc.invalidateQueries({ queryKey: ["dashboard"] });
+                    }}
+                    onDelete={(id) => deleteMut.mutate(id)}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <SettingsPanel />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
+  );
+}
+
+function ApplicationsTable({
+  apps,
+  onEditSave,
+  onDelete,
+}: {
+  apps: Application[];
+  onEditSave: (id: string, form: FormShape) => Promise<void>;
+  onDelete: (id: string) => void;
+}) {
+  const [company, setCompany] = useState("");
+  const [role, setRole] = useState("");
+  const [applied, setApplied] = useState("");
+  const [status, setStatus] = useState<Status | "all">("all");
+  const [lastUpdate, setLastUpdate] = useState("");
+
+  const filtered = useMemo(() => {
+    const c = company.trim().toLowerCase();
+    const r = role.trim().toLowerCase();
+    return apps.filter((a) => {
+      if (c && !a.company.toLowerCase().includes(c)) return false;
+      if (r && !a.role.toLowerCase().includes(r)) return false;
+      if (status !== "all" && a.status !== status) return false;
+      if (applied && !a.applied_at.startsWith(applied)) return false;
+      if (lastUpdate && !a.last_status_at.startsWith(lastUpdate)) return false;
+      return true;
+    });
+  }, [apps, company, role, applied, status, lastUpdate]);
+
+  const clearAll = () => {
+    setCompany(""); setRole(""); setApplied(""); setStatus("all"); setLastUpdate("");
+  };
+  const hasFilters = !!(company || role || applied || lastUpdate) || status !== "all";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          Showing {filtered.length} of {apps.length}
+        </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" onClick={clearAll}>Clear filters</Button>
+        )}
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Company</TableHead>
+            <TableHead>Role</TableHead>
+            <TableHead>Applied</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Last update</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+          <TableRow>
+            <TableHead>
+              <Input placeholder="Filter…" value={company} onChange={(e) => setCompany(e.target.value)} className="h-8" />
+            </TableHead>
+            <TableHead>
+              <Input placeholder="Filter…" value={role} onChange={(e) => setRole(e.target.value)} className="h-8" />
+            </TableHead>
+            <TableHead>
+              <Input type="date" value={applied} onChange={(e) => setApplied(e.target.value)} className="h-8" />
+            </TableHead>
+            <TableHead>
+              <Select value={status} onValueChange={(v) => setStatus(v as Status | "all")}>
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {(["applied", "interview", "offer", "rejected", "other"] as Status[]).map((s) => (
+                    <SelectItem key={s} value={s}>{STATUS_META[s].label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </TableHead>
+            <TableHead>
+              <Input type="date" value={lastUpdate} onChange={(e) => setLastUpdate(e.target.value)} className="h-8" />
+            </TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filtered.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                No applications match your filters.
+              </TableCell>
+            </TableRow>
+          ) : (
+            filtered.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell className="font-medium">{a.company}</TableCell>
+                <TableCell>{a.role}</TableCell>
+                <TableCell>{formatDate(a.applied_at)}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className={STATUS_META[a.status].className}>
+                    {STATUS_META[a.status].label}
+                  </Badge>
+                </TableCell>
+                <TableCell>{formatDate(a.last_status_at)}</TableCell>
+                <TableCell className="text-right">
+                  <AppDialog
+                    initial={a}
+                    onSave={(form) => onEditSave(a.id, form)}
+                    trigger={
+                      <Button variant="ghost" size="icon">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                  <Button variant="ghost" size="icon" onClick={() => onDelete(a.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function SettingsPanel() {
+  const qc = useQueryClient();
+  const fetchGet = useServerFn(getSettings);
+  const fetchSave = useServerFn(saveSettings);
+  const { data, isLoading } = useQuery({
+    queryKey: ["user-settings"],
+    queryFn: () => fetchGet(),
+  });
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+  const [initialized, setInitialized] = useState(false);
+  useEffect(() => {
+    if (data && !initialized) {
+      setApiKey(data.gemini_api_key ?? "");
+      setModel(data.gemini_model ?? "");
+      setInitialized(true);
+    }
+  }, [data, initialized]);
+
+  const saveMut = useMutation({
+    mutationFn: () => fetchSave({ data: { gemini_api_key: apiKey, gemini_model: model } }),
+    onSuccess: () => {
+      toast.success("Settings saved");
+      qc.invalidateQueries({ queryKey: ["user-settings"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Save failed"),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>AI Settings</CardTitle>
+        <CardDescription>
+          Override the Gemini API key and model used to classify your emails. Leave blank to use the server defaults.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label>Gemini API key</Label>
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder="AIza…"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored per user. Get one at aistudio.google.com/apikey.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Gemini model</Label>
+              <Input
+                placeholder="gemini-2.5-flash"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Any Gemini model id, e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>, <code>gemini-2.0-flash</code>.
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+                {saveMut.isPending ? "Saving…" : "Save settings"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

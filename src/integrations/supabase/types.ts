@@ -151,6 +151,27 @@ export type Database = {
         }
         Relationships: []
       }
+      user_settings: {
+        Row: {
+          gemini_api_key: string | null
+          gemini_model: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          gemini_api_key?: string | null
+          gemini_model?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          gemini_api_key?: string | null
+          gemini_model?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

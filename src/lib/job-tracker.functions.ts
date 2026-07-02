@@ -98,3 +98,40 @@ export const toggleScan = createServerFn({ method: "POST" })
     if (error) throw error;
     return { ok: true };
   });
+
+export const getSettings = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("user_settings")
+      .select("gemini_api_key,gemini_model")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (error) throw error;
+    return {
+      gemini_api_key: (data as any)?.gemini_api_key ?? "",
+      gemini_model: (data as any)?.gemini_model ?? "",
+    };
+  });
+
+const SettingsSchema = z.object({
+  gemini_api_key: z.string().max(200).optional().nullable(),
+  gemini_model: z.string().max(100).optional().nullable(),
+});
+
+export const saveSettings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => SettingsSchema.parse(input))
+  .handler(async ({ data, context }) => {
+    const row = {
+      user_id: context.userId,
+      gemini_api_key: data.gemini_api_key?.trim() || null,
+      gemini_model: data.gemini_model?.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await context.supabase
+      .from("user_settings")
+      .upsert(row, { onConflict: "user_id" });
+    if (error) throw error;
+    return { ok: true };
+  });

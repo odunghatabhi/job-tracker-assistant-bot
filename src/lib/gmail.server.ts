@@ -5,7 +5,7 @@ import { normalize } from "./normalize";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
 export interface ClassifiedEmail {
   is_job: boolean;
@@ -180,9 +180,11 @@ export async function getMessageMeta(
 
 export async function classifyEmails(
   emails: GmailMessageLite[],
+  opts?: { apiKey?: string | null; model?: string | null },
 ): Promise<Record<string, ClassifiedEmail>> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = opts?.apiKey || process.env.GEMINI_API_KEY;
+  const model = opts?.model || DEFAULT_GEMINI_MODEL;
+  if (!apiKey) throw new Error("Gemini API key is not configured. Add it in Settings.");
   if (emails.length === 0) return {};
 
   const prompt = `You are a strict multilingual classifier of job-application emails (English AND German — Bewerbung, Vorstellungsgespräch, Absage, Zusage, etc.). For EACH email below, decide:
@@ -211,7 +213,7 @@ ${emails
   .join("\n\n")}`;
 
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -431,6 +433,7 @@ async function reconcileUnlinkedEvents(
   supabaseAdmin: any,
   userId: string,
   knownApps: ApplicationRow[],
+  aiOpts?: { apiKey?: string | null; model?: string | null },
 ): Promise<{ classified: number; updated: number; skipped: number }> {
   const cutoff = new Date(Date.now() - 180 * 86_400_000).toISOString();
   const { data: events } = await supabaseAdmin
@@ -456,7 +459,7 @@ async function reconcileUnlinkedEvents(
   let skipped = 0;
   for (let i = 0; i < messages.length; i += 10) {
     const batch = messages.slice(i, i + 10);
-    const results = await classifyEmails(batch);
+    const results = await classifyEmails(batch, aiOpts);
     for (let j = 0; j < batch.length; j += 1) {
       const message = batch[j];
       const event = eventRows[i + j];
@@ -503,16 +506,19 @@ export interface SyncResult {
 export async function syncUserGmail(userId: string): Promise<SyncResult> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-  const { data: sync, error: syncErr } = await supabaseAdmin
-    .from("gmail_sync")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
+  const [{ data: sync, error: syncErr }, { data: settings }] = await Promise.all([
+    supabaseAdmin.from("gmail_sync").select("*").eq("user_id", userId).maybeSingle(),
+    supabaseAdmin.from("user_settings").select("gemini_api_key,gemini_model").eq("user_id", userId).maybeSingle(),
+  ]);
   if (syncErr) throw syncErr;
   if (!sync) throw new Error("Gmail is not connected for this user.");
   if (!sync.scan_enabled) {
     return { scanned: 0, classified: 0, created: 0, updated: 0, skipped: 0 };
   }
+  const aiOpts = {
+    apiKey: (settings as any)?.gemini_api_key ?? null,
+    model: (settings as any)?.gemini_model ?? null,
+  };
 
   // Refresh access token if missing or near expiry.
   let accessToken = sync.access_token as string | null;
@@ -587,7 +593,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
   let skipped = 0;
   for (let i = 0; i < messages.length; i += 10) {
     const batch = messages.slice(i, i + 10);
-    const results = await classifyEmails(batch);
+    const results = await classifyEmails(batch, aiOpts);
     for (const m of batch) {
       const r = enhanceClassification(m, results[m.id]);
       if (!r) {
@@ -693,7 +699,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
     }
   }
 
-  const repaired = await reconcileUnlinkedEvents(supabaseAdmin, userId, knownApps);
+  const repaired = await reconcileUnlinkedEvents(supabaseAdmin, userId, knownApps, aiOpts);
   classified += repaired.classified;
   updated += repaired.updated;
   skipped += repaired.skipped;
