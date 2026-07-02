@@ -188,18 +188,19 @@ export async function classifyEmails(
   const prompt = `You are a strict multilingual classifier of job-application emails (English AND German — Bewerbung, Vorstellungsgespräch, Absage, Zusage, etc.). For EACH email below, decide:
 - is_job: true if the email is about the recipient's own job application lifecycle — application confirmation, interview invite/scheduling/reschedule, recruiter screen, online assessment, take-home, offer, OR rejection. Newsletters, job alerts, "jobs you might like", marketing, generic recruiter outreach with no specific application => false.
 - type: EXACTLY one of:
-  * "applied"   — application received / "thank you for applying" / "Eingangsbestätigung" / "Wir haben Ihre Bewerbung erhalten" / "Vielen Dank für Ihre Bewerbung".
-  * "interview" — interview invite, scheduling, recruiter screen, assessment, take-home, "next steps" / "Einladung zum Vorstellungsgespräch" / "Interview" / "Kennenlerngespräch" / "nächste Schritte".
+  * "applied"   — application received / "thank you for applying" / "Eingangsbestätigung" / "Vielen Dank für Ihre Bewerbung".
+  * "interview" — interview invite, scheduling, recruiter screen, assessment, take-home, "next steps" / "Einladung zum Vorstellungsgespräch" / "Kennenlerngespräch" / "nächste Schritte".
   * "offer"     — formal job offer / "Vertragsangebot" / "Zusage" / "Angebot".
-  * "rejected"  — application unsuccessful. English: "unfortunately", "we regret", "not moving forward", "other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration". German: "leider", "Absage", "leider müssen wir Ihnen absagen", "haben wir uns gegen Sie entschieden", "andere Bewerber", "nicht weiter berücksichtigen", "nicht in die engere Auswahl", "Ihre Bewerbung nicht weiterverfolgen".
-  * "other"     — anything else, including marketing or generic job alerts.
+  * "rejected"  — application unsuccessful. English: "unfortunately", "we regret", "not moving forward", "other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration". German: "leider", "Absage", "haben wir uns gegen Sie entschieden", "andere Bewerber", "nicht weiter berücksichtigen", "nicht in die engere Auswahl", "Ihre Bewerbung nicht weiterverfolgen".
+  * "other"     — anything else.
   Bias toward "rejected" when the email is clearly negative about the recipient's application, in any language.
-- company: hiring company name only — NOT the applicant-tracking platform. If sender/body mentions Workday, Greenhouse, Lever, Personio, SmartRecruiters, Teamtailor, Ashby, Recruitee, Taleo, SuccessFactors, BambooHR, or Workable, extract the employer/customer company instead. Strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). Extract from subject/body/signature/from domain if needed. null only if truly unknown.
+- company: hiring company name only — NOT the applicant-tracking platform. If sender/body mentions Workday, Greenhouse, Lever, Personio, SmartRecruiters, Teamtailor, Ashby, Recruitee, Taleo, SuccessFactors, BambooHR, or Workable, extract the employer/customer company instead. Strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). For staffing/consulting agencies (Ferchau, Alten, Hays, Randstad, Adecco, Brunel, GULP, Amadeus Fire, Michael Page, Robert Half, Modis, Akkodis) — the agency IS the company. null only if truly unknown.
 - role: the job title. For status updates without a role in this email, try subject ("Your application for X" / "Ihre Bewerbung als X"), otherwise null — do not invent.
+- recruiter: the sender's personal name if the email is signed by an individual recruiter (e.g. "Anna Müller"), especially for staffing agencies. null if none/generic.
 - applied_at_iso: only for type="applied". Use the email received time if not stated. Otherwise null.
 - confidence: 0..1. Use >=0.6 when subject/body clearly states the outcome.
 
-Return ONLY a JSON object: {"results":[{"id":"...","is_job":true,"type":"...","company":"...","role":"...","applied_at_iso":null,"confidence":0.9}, ...]} — one entry per email, in order.
+Return ONLY a JSON object: {"results":[{"id":"...","is_job":true,"type":"...","company":"...","role":"...","recruiter":null,"applied_at_iso":null,"confidence":0.9}, ...]} — one entry per email, in order.
 
 Emails:
 ${emails
@@ -208,6 +209,7 @@ ${emails
       `[${i}] id=${e.id}\nFrom: ${e.from}\nSubject: ${e.subject}\nReceived: ${e.receivedAt}\nBody: ${e.snippet}`,
   )
   .join("\n\n")}`;
+
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
