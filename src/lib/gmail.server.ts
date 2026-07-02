@@ -12,6 +12,7 @@ export interface ClassifiedEmail {
   type: "applied" | "interview" | "offer" | "rejected" | "other";
   company: string | null;
   role: string | null;
+  recruiter: string | null;
   applied_at_iso: string | null;
   confidence: number;
 }
