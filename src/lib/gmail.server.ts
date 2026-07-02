@@ -393,7 +393,9 @@ function findBestApplication(apps: ApplicationRow[], result: ClassifiedEmail, me
       if (companyScore < 0.5 && !mentionedCompany && domainScore < 0.75) return null;
 
       const roleScore = result.role ? overlapScore(result.role, app.role, ROLE_STOPWORDS) : 0;
-      if (result.role && roleScore < 0.35 && !isStatusUpdateType(result.type)) return null;
+      const recruiterScore = result.recruiter ? overlapScore(result.recruiter, app.role, ROLE_STOPWORDS) : 0;
+      const effectiveRoleScore = Math.max(roleScore, recruiterScore);
+      if (result.role && roleScore < 0.35 && recruiterScore < 0.5 && !isStatusUpdateType(result.type)) return null;
 
       const appliedAt = new Date(app.applied_at).getTime();
       const daysSinceApplied = Math.max(0, (incomingAt - appliedAt) / 86_400_000);
@@ -403,7 +405,7 @@ function findBestApplication(apps: ApplicationRow[], result: ClassifiedEmail, me
         companyScore * 6 +
         (mentionedCompany ? 3 : 0) +
         domainScore * 2 +
-        roleScore * 3 +
+        effectiveRoleScore * 3 +
         statusAfterApplicationBonus -
         recencyPenalty;
       return { app, score };
