@@ -12,6 +12,7 @@ export interface ClassifiedEmail {
   type: "applied" | "interview" | "offer" | "rejected" | "other";
   company: string | null;
   role: string | null;
+  recruiter: string | null;
   applied_at_iso: string | null;
   confidence: number;
 }
@@ -187,18 +188,19 @@ export async function classifyEmails(
   const prompt = `You are a strict multilingual classifier of job-application emails (English AND German — Bewerbung, Vorstellungsgespräch, Absage, Zusage, etc.). For EACH email below, decide:
 - is_job: true if the email is about the recipient's own job application lifecycle — application confirmation, interview invite/scheduling/reschedule, recruiter screen, online assessment, take-home, offer, OR rejection. Newsletters, job alerts, "jobs you might like", marketing, generic recruiter outreach with no specific application => false.
 - type: EXACTLY one of:
-  * "applied"   — application received / "thank you for applying" / "Eingangsbestätigung" / "Wir haben Ihre Bewerbung erhalten" / "Vielen Dank für Ihre Bewerbung".
-  * "interview" — interview invite, scheduling, recruiter screen, assessment, take-home, "next steps" / "Einladung zum Vorstellungsgespräch" / "Interview" / "Kennenlerngespräch" / "nächste Schritte".
+  * "applied"   — application received / "thank you for applying" / "Eingangsbestätigung" / "Vielen Dank für Ihre Bewerbung".
+  * "interview" — interview invite, scheduling, recruiter screen, assessment, take-home, "next steps" / "Einladung zum Vorstellungsgespräch" / "Kennenlerngespräch" / "nächste Schritte".
   * "offer"     — formal job offer / "Vertragsangebot" / "Zusage" / "Angebot".
-  * "rejected"  — application unsuccessful. English: "unfortunately", "we regret", "not moving forward", "other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration". German: "leider", "Absage", "leider müssen wir Ihnen absagen", "haben wir uns gegen Sie entschieden", "andere Bewerber", "nicht weiter berücksichtigen", "nicht in die engere Auswahl", "Ihre Bewerbung nicht weiterverfolgen".
-  * "other"     — anything else, including marketing or generic job alerts.
+  * "rejected"  — application unsuccessful. English: "unfortunately", "we regret", "not moving forward", "other candidates", "position has been filled", "not selected", "will not be proceeding", "no longer under consideration". German: "leider", "Absage", "haben wir uns gegen Sie entschieden", "andere Bewerber", "nicht weiter berücksichtigen", "nicht in die engere Auswahl", "Ihre Bewerbung nicht weiterverfolgen".
+  * "other"     — anything else.
   Bias toward "rejected" when the email is clearly negative about the recipient's application, in any language.
-- company: hiring company name only — NOT the applicant-tracking platform. If sender/body mentions Workday, Greenhouse, Lever, Personio, SmartRecruiters, Teamtailor, Ashby, Recruitee, Taleo, SuccessFactors, BambooHR, or Workable, extract the employer/customer company instead. Strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). Extract from subject/body/signature/from domain if needed. null only if truly unknown.
+- company: hiring company name only — NOT the applicant-tracking platform. If sender/body mentions Workday, Greenhouse, Lever, Personio, SmartRecruiters, Teamtailor, Ashby, Recruitee, Taleo, SuccessFactors, BambooHR, or Workable, extract the employer/customer company instead. Strip suffixes ("Inc.", "GmbH", "AG", "Talent Acquisition", "Recruiting", "Careers", "Personalabteilung"). For staffing/consulting agencies (Ferchau, Alten, Hays, Randstad, Adecco, Brunel, GULP, Amadeus Fire, Michael Page, Robert Half, Modis, Akkodis) — the agency IS the company. null only if truly unknown.
 - role: the job title. For status updates without a role in this email, try subject ("Your application for X" / "Ihre Bewerbung als X"), otherwise null — do not invent.
+- recruiter: the sender's personal name if the email is signed by an individual recruiter (e.g. "Anna Müller"), especially for staffing agencies. null if none/generic.
 - applied_at_iso: only for type="applied". Use the email received time if not stated. Otherwise null.
 - confidence: 0..1. Use >=0.6 when subject/body clearly states the outcome.
 
-Return ONLY a JSON object: {"results":[{"id":"...","is_job":true,"type":"...","company":"...","role":"...","applied_at_iso":null,"confidence":0.9}, ...]} — one entry per email, in order.
+Return ONLY a JSON object: {"results":[{"id":"...","is_job":true,"type":"...","company":"...","role":"...","recruiter":null,"applied_at_iso":null,"confidence":0.9}, ...]} — one entry per email, in order.
 
 Emails:
 ${emails
@@ -207,6 +209,7 @@ ${emails
       `[${i}] id=${e.id}\nFrom: ${e.from}\nSubject: ${e.subject}\nReceived: ${e.receivedAt}\nBody: ${e.snippet}`,
   )
   .join("\n\n")}`;
+
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
@@ -238,6 +241,7 @@ ${emails
       type: (r.type ?? "other") as ClassifiedEmail["type"],
       company: r.company ?? null,
       role: r.role ?? null,
+      recruiter: (r as any).recruiter ?? null,
       applied_at_iso: r.applied_at_iso ?? null,
       confidence: typeof r.confidence === "number" ? r.confidence : 0,
     };
@@ -307,6 +311,17 @@ function emailDomainTokens(from: string): Set<string> {
   return tokenSet(withoutTld, COMPANY_STOPWORDS);
 }
 
+function extractSenderName(from: string): string | null {
+  // "Anna Müller <a.mueller@ferchau.com>" -> "Anna Müller"
+  const m = from.match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/);
+  const name = (m?.[1] ?? "").trim();
+  if (!name || name.includes("@")) return null;
+  // Skip generic team names
+  const lower = name.toLowerCase();
+  if (/(no[- ]?reply|team|recruiting|talent|careers|hr|human resources|personal|notification)/.test(lower)) return null;
+  return name;
+}
+
 function messageMentionsCompany(app: ApplicationRow, normalizedText: string): boolean {
   const companyText = normalize(app.company);
   if (companyText.length >= 4 && normalizedText.includes(companyText)) return true;
@@ -340,11 +355,12 @@ function detectLifecycleType(message: GmailMessageLite): ClassifiedEmail["type"]
 
 function enhanceClassification(message: GmailMessageLite, result?: ClassifiedEmail): ClassifiedEmail {
   const forcedType = detectLifecycleType(message);
-  const base = result ?? {
+  const base: ClassifiedEmail = result ?? {
     is_job: false,
-    type: "other" as const,
+    type: "other",
     company: null,
     role: null,
+    recruiter: null,
     applied_at_iso: null,
     confidence: 0,
   };
@@ -377,7 +393,9 @@ function findBestApplication(apps: ApplicationRow[], result: ClassifiedEmail, me
       if (companyScore < 0.5 && !mentionedCompany && domainScore < 0.75) return null;
 
       const roleScore = result.role ? overlapScore(result.role, app.role, ROLE_STOPWORDS) : 0;
-      if (result.role && roleScore < 0.35 && !isStatusUpdateType(result.type)) return null;
+      const recruiterScore = result.recruiter ? overlapScore(result.recruiter, app.role, ROLE_STOPWORDS) : 0;
+      const effectiveRoleScore = Math.max(roleScore, recruiterScore);
+      if (result.role && roleScore < 0.35 && recruiterScore < 0.5 && !isStatusUpdateType(result.type)) return null;
 
       const appliedAt = new Date(app.applied_at).getTime();
       const daysSinceApplied = Math.max(0, (incomingAt - appliedAt) / 86_400_000);
@@ -387,7 +405,7 @@ function findBestApplication(apps: ApplicationRow[], result: ClassifiedEmail, me
         companyScore * 6 +
         (mentionedCompany ? 3 : 0) +
         domainScore * 2 +
-        roleScore * 3 +
+        effectiveRoleScore * 3 +
         statusAfterApplicationBonus -
         recencyPenalty;
       return { app, score };
@@ -593,14 +611,21 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         continue;
       }
 
+      const senderName = extractSenderName(m.from);
+      const recruiter = r.recruiter ?? senderName;
+      // For staffing agencies without a job title, use recruiter name so multiple applications stay distinct.
+      const effectiveRole = r.role ?? (recruiter ? `Recruiter: ${recruiter}` : null);
       const companyNorm = r.company ? normalize(r.company) : "";
-      const roleNorm = r.role ? normalize(r.role) : null;
-      const existingApp = findBestApplication(knownApps, r, m);
+      const roleNorm = effectiveRole ? normalize(effectiveRole) : null;
+      // Pass recruiter into matcher via a shallow copy so findBestApplication sees it.
+      const matchResult: ClassifiedEmail = { ...r, recruiter };
+      const existingApp = findBestApplication(knownApps, matchResult, m);
 
       let appId: string;
       if (!existingApp) {
-        // Need a role to create a new row. Skip status-update emails for unknown apps.
-        if (!r.company || !roleNorm) {
+        // Only CREATE new applications for "applied" emails. Status updates without a match
+        // become unlinked events — reconciled later once the "applied" arrives.
+        if (r.type !== "applied" || !r.company || !roleNorm) {
           await supabaseAdmin.from("email_events").insert({
             user_id: userId,
             application_id: null,
@@ -620,10 +645,10 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
             user_id: userId,
             company: r.company,
             company_norm: companyNorm,
-            role: r.role!,
+            role: effectiveRole!,
             role_norm: roleNorm!,
             applied_at: appliedAt,
-            status: r.type === "other" ? "applied" : r.type,
+            status: "applied",
             last_status_at: m.receivedAt,
             last_email_id: m.id,
             source: "gmail",
