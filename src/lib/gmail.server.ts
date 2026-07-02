@@ -433,6 +433,7 @@ async function reconcileUnlinkedEvents(
   supabaseAdmin: any,
   userId: string,
   knownApps: ApplicationRow[],
+  aiOpts?: { apiKey?: string | null; model?: string | null },
 ): Promise<{ classified: number; updated: number; skipped: number }> {
   const cutoff = new Date(Date.now() - 180 * 86_400_000).toISOString();
   const { data: events } = await supabaseAdmin
@@ -458,7 +459,7 @@ async function reconcileUnlinkedEvents(
   let skipped = 0;
   for (let i = 0; i < messages.length; i += 10) {
     const batch = messages.slice(i, i + 10);
-    const results = await classifyEmails(batch);
+    const results = await classifyEmails(batch, aiOpts);
     for (let j = 0; j < batch.length; j += 1) {
       const message = batch[j];
       const event = eventRows[i + j];
@@ -505,16 +506,19 @@ export interface SyncResult {
 export async function syncUserGmail(userId: string): Promise<SyncResult> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-  const { data: sync, error: syncErr } = await supabaseAdmin
-    .from("gmail_sync")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
+  const [{ data: sync, error: syncErr }, { data: settings }] = await Promise.all([
+    supabaseAdmin.from("gmail_sync").select("*").eq("user_id", userId).maybeSingle(),
+    supabaseAdmin.from("user_settings").select("gemini_api_key,gemini_model").eq("user_id", userId).maybeSingle(),
+  ]);
   if (syncErr) throw syncErr;
   if (!sync) throw new Error("Gmail is not connected for this user.");
   if (!sync.scan_enabled) {
     return { scanned: 0, classified: 0, created: 0, updated: 0, skipped: 0 };
   }
+  const aiOpts = {
+    apiKey: (settings as any)?.gemini_api_key ?? null,
+    model: (settings as any)?.gemini_model ?? null,
+  };
 
   // Refresh access token if missing or near expiry.
   let accessToken = sync.access_token as string | null;
