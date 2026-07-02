@@ -593,7 +593,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
   let skipped = 0;
   for (let i = 0; i < messages.length; i += 10) {
     const batch = messages.slice(i, i + 10);
-    const results = await classifyEmails(batch);
+    const results = await classifyEmails(batch, aiOpts);
     for (const m of batch) {
       const r = enhanceClassification(m, results[m.id]);
       if (!r) {
@@ -699,7 +699,7 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
     }
   }
 
-  const repaired = await reconcileUnlinkedEvents(supabaseAdmin, userId, knownApps);
+  const repaired = await reconcileUnlinkedEvents(supabaseAdmin, userId, knownApps, aiOpts);
   classified += repaired.classified;
   updated += repaired.updated;
   skipped += repaired.skipped;
