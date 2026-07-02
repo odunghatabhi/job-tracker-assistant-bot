@@ -9,6 +9,8 @@ import {
   upsertApplication,
   deleteApplication,
   disconnectGmail,
+  getSettings,
+  saveSettings,
 } from "@/lib/job-tracker.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
