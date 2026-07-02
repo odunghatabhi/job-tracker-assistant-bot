@@ -311,6 +311,17 @@ function emailDomainTokens(from: string): Set<string> {
   return tokenSet(withoutTld, COMPANY_STOPWORDS);
 }
 
+function extractSenderName(from: string): string | null {
+  // "Anna Müller <a.mueller@ferchau.com>" -> "Anna Müller"
+  const m = from.match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/);
+  const name = (m?.[1] ?? "").trim();
+  if (!name || name.includes("@")) return null;
+  // Skip generic team names
+  const lower = name.toLowerCase();
+  if (/(no[- ]?reply|team|recruiting|talent|careers|hr|human resources|personal|notification)/.test(lower)) return null;
+  return name;
+}
+
 function messageMentionsCompany(app: ApplicationRow, normalizedText: string): boolean {
   const companyText = normalize(app.company);
   if (companyText.length >= 4 && normalizedText.includes(companyText)) return true;
