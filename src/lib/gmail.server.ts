@@ -611,14 +611,21 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
         continue;
       }
 
+      const senderName = extractSenderName(m.from);
+      const recruiter = r.recruiter ?? senderName;
+      // For staffing agencies without a job title, use recruiter name so multiple applications stay distinct.
+      const effectiveRole = r.role ?? (recruiter ? `Recruiter: ${recruiter}` : null);
       const companyNorm = r.company ? normalize(r.company) : "";
-      const roleNorm = r.role ? normalize(r.role) : null;
-      const existingApp = findBestApplication(knownApps, r, m);
+      const roleNorm = effectiveRole ? normalize(effectiveRole) : null;
+      // Pass recruiter into matcher via a shallow copy so findBestApplication sees it.
+      const matchResult: ClassifiedEmail = { ...r, recruiter };
+      const existingApp = findBestApplication(knownApps, matchResult, m);
 
       let appId: string;
       if (!existingApp) {
-        // Need a role to create a new row. Skip status-update emails for unknown apps.
-        if (!r.company || !roleNorm) {
+        // Only CREATE new applications for "applied" emails. Status updates without a match
+        // become unlinked events — reconciled later once the "applied" arrives.
+        if (r.type !== "applied" || !r.company || !roleNorm) {
           await supabaseAdmin.from("email_events").insert({
             user_id: userId,
             application_id: null,
@@ -638,10 +645,10 @@ export async function syncUserGmail(userId: string): Promise<SyncResult> {
             user_id: userId,
             company: r.company,
             company_norm: companyNorm,
-            role: r.role!,
+            role: effectiveRole!,
             role_norm: roleNorm!,
             applied_at: appliedAt,
-            status: r.type === "other" ? "applied" : r.type,
+            status: "applied",
             last_status_at: m.receivedAt,
             last_email_id: m.id,
             source: "gmail",
