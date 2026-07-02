@@ -5,7 +5,7 @@ import { normalize } from "./normalize";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
 export interface ClassifiedEmail {
   is_job: boolean;
@@ -180,9 +180,11 @@ export async function getMessageMeta(
 
 export async function classifyEmails(
   emails: GmailMessageLite[],
+  opts?: { apiKey?: string | null; model?: string | null },
 ): Promise<Record<string, ClassifiedEmail>> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = opts?.apiKey || process.env.GEMINI_API_KEY;
+  const model = opts?.model || DEFAULT_GEMINI_MODEL;
+  if (!apiKey) throw new Error("Gemini API key is not configured. Add it in Settings.");
   if (emails.length === 0) return {};
 
   const prompt = `You are a strict multilingual classifier of job-application emails (English AND German — Bewerbung, Vorstellungsgespräch, Absage, Zusage, etc.). For EACH email below, decide:
@@ -211,7 +213,7 @@ ${emails
   .join("\n\n")}`;
 
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
