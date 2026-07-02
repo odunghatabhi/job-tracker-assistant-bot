@@ -241,6 +241,7 @@ ${emails
       type: (r.type ?? "other") as ClassifiedEmail["type"],
       company: r.company ?? null,
       role: r.role ?? null,
+      recruiter: (r as any).recruiter ?? null,
       applied_at_iso: r.applied_at_iso ?? null,
       confidence: typeof r.confidence === "number" ? r.confidence : 0,
     };
