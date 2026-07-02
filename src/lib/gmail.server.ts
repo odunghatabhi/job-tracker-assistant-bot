@@ -344,11 +344,12 @@ function detectLifecycleType(message: GmailMessageLite): ClassifiedEmail["type"]
 
 function enhanceClassification(message: GmailMessageLite, result?: ClassifiedEmail): ClassifiedEmail {
   const forcedType = detectLifecycleType(message);
-  const base = result ?? {
+  const base: ClassifiedEmail = result ?? {
     is_job: false,
-    type: "other" as const,
+    type: "other",
     company: null,
     role: null,
+    recruiter: null,
     applied_at_iso: null,
     confidence: 0,
   };
